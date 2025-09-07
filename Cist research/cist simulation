@@ -1,0 +1,139 @@
+# cist_simulation.py
+"""
+CIST Mini-Simulation (improved)
+
+Simulates multiple string modes psi_n across many cycles using:
+    psi_n(i+1) = lambda_n * exp(i * theta_n(i)) * psi_n(i) + noise
+
+- Tracks complex amplitudes for each mode across cycles
+- Plots:
+    - Some sample mode magnitudes vs cycle
+    - Total information (sum of mode magnitudes) vs cycle
+    - Heatmap of mode magnitudes across cycles
+
+Dependencies:
+    numpy, matplotlib
+
+Run:
+    python cist_simulation.py
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+# pyright: ignore[reportMissingImports]
+# -----------------------------
+# Parameters (tweak these)
+# -----------------------------
+cycles = 80            # number of cycles to simulate
+M = 13                # number of string modes
+info_initial = 1.0     # typical initial amplitude magnitude
+seed = 42              # random seed for reproducibility
+noise_scale = 0.01     # small random "injection" of information each cycle
+
+# Mode-specific attenuation: e.g., higher-n modes attenuate faster
+# You can choose any functional form; here's an example:=---
+lambda_base = 0.97
+lambda_drop_per_mode = 0.005
+np.random.seed(seed)
+
+# Create per-mode attenuation values in (0,1)
+lambda_n = np.clip(lambda_base - lambda_drop_per_mode * np.arange(M) + 0.005*np.random.randn(M), 0.5, 0.999)
+
+# If you want phases to be randomly drawn each cycle, we'll sample them per cycle below
+# theta_n(i) ~ Normal(0, phase_sigma) or uniform(-pi, pi)
+phase_sigma = 0.8   # larger -> phases vary more from cycle to cycle
+
+# initialize psi: complex amplitudes for each mode at cycle 0
+# Give each mode a random complex initial amplitude with typical magnitude ~ info_initial
+angles0 = np.random.uniform(0, 2*np.pi, size=M)
+magnitudes0 = info_initial * (1.0 - 0.2 * np.random.rand(M))  # slight variation
+psi = np.array([magnitudes0 * np.exp(1j*angles0)], dtype=complex)  # shape (1, M)
+
+# prepare storage for all cycles
+psi_all = np.zeros((cycles, M), dtype=complex)
+psi_all[0, :] = psi[0, :]
+
+# evolve
+for i in range(1, cycles):
+    # draw per-mode phases for this cycle-step
+    theta_i = np.random.normal(loc=0.0, scale=phase_sigma, size=M)
+    # multiplicative factor per mode
+    factor = lambda_n * np.exp(1j * theta_i)
+    prev = psi_all[i-1, :]
+    # optional small noise/injection term to represent interactions/perturbations
+    noise = noise_scale * (np.random.randn(M) + 1j*np.random.randn(M))
+    psi_all[i, :] = factor * prev + noise
+
+# Derived quantities
+magnitudes = np.abs(psi_all)               # shape (cycles, M)
+phases = np.angle(psi_all)
+total_info = np.sum(magnitudes, axis=1)    # sum of magnitudes across modes
+
+# -----------------------------
+# Plotting: create plots directory
+# -----------------------------
+outdir = "plots"
+os.makedirs(outdir, exist_ok=True)
+
+# 1) Plot a few sample mode magnitudes vs cycles
+plt.figure(figsize=(10, 6))
+sample_modes = list(range(min(6, M)))  # plot up to 6 modes
+for n in sample_modes:
+    plt.plot(range(cycles), magnitudes[:, n], label=f"mode {n}")
+plt.xlabel("Cycle")
+plt.ylabel("Mode magnitude |ψ_n|")
+plt.title("Sample mode magnitudes vs cycle")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig(os.path.join(outdir, "cist_modes_sample.png"), dpi=200)
+plt.close()
+
+# 2) Plot total information vs cycle
+plt.figure(figsize=(8, 5))
+plt.plot(range(cycles), total_info, marker='o')
+plt.xlabel("Cycle")
+plt.ylabel("Total information (sum |ψ_n|)")
+plt.title("Total information across cycles")
+plt.grid(True)
+plt.tight_layout()
+plt.savefig(os.path.join(outdir, "cist_total_information.png"), dpi=200)
+plt.close()
+
+# 3) Heatmap: mode (y) vs cycle (x) of magnitudes
+plt.figure(figsize=(10, 6))
+plt.imshow(magnitudes.T, aspect='auto', origin='lower', interpolation='nearest')
+plt.colorbar(label='|ψ_n|')
+plt.xlabel('Cycle')
+plt.ylabel('Mode index n')
+plt.title('Heatmap of mode magnitudes across cycles')
+plt.tight_layout()
+plt.savefig(os.path.join(outdir, "cist_magnitudes_heatmap.png"), dpi=200)
+plt.close()
+
+# 4) Optional: plot phase evolution for 2 modes (for interest)
+plt.figure(figsize=(10, 5))
+for n in sample_modes[:3]:
+    plt.plot(range(cycles), phases[:, n], label=f"mode {n}")
+plt.xlabel("Cycle")
+plt.ylabel("Phase (radians)")
+plt.title("Sample mode phases vs cycle")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig(os.path.join(outdir, "cist_phases_sample.png"), dpi=200)
+plt.close()
+
+# 5) Save a simple CSV with magnitudes for later analysis / GitHub upload
+import csv
+csv_path = os.path.join(outdir, "cist_magnitudes.csv")
+with open(csv_path, "w", newline='') as f:
+    w = csv.writer(f)
+    header = ["cycle"] + [f"mode_{n}" for n in range(M)]
+    w.writerow(header)
+    for i in range(cycles):
+        row = [i] + magnitudes[i, :].tolist()
+        w.writerow(row)
+
+print(f"Done. Plots saved to '{outdir}/' and magnitudes CSV saved to '{csv_path}'.")
